@@ -1,0 +1,74 @@
+
+Python scripts used for Kellogg MECN 446 "Pricing Strategies."
+The class is an MBA economics elective focused on data science as applied to
+pricing and revenue optimization.
+
+Under "applets" are barebones tkinter applications for in-class games and
+pricing simulations.
+
+Under "data_scripts" are various scripts to generate data used in class.
+
+
+
+
+linear_intent.py creates eBike dataset 
+
+
+ Below, notes on ivprobit
+
+
+Note transform trick to broadcast grouped result into original df. 100x
+speedup on first stage. good use of kernprof to nail first stage speedup
+
+gets it to 25 ish seconds on 2000 bootstrap reps
+
+Numba speedup hard to catch. timeit on just the assign call over MANY (to
+swamp out compilation) revealed that
+
+numbaratiovec (vectorized via vectorize decorator in NUMBA not numpy) created
+30 pc speedup over normal assign. jit decorator on dereferencing of
+2d array was faster on computation, but net of getting the 2d array via .loc
+
+	df.loc[, <vars>].to_numpy()
+
+was slower.
+
+kernprof is a bit disleading on this, since its allocation to assign chain
+seems arbitrary. overall assign call on several vars was sped up (20 ish
+pc on 5000 reps) but the allocation to the precise numba-d line was off
+(even showed up as MORE expensive per hit).
+
+WEIRD: on profiling, assign is oddly  non-performant. However, hard to get
+this effect to show up on full tests--maybe slow paths get optimized away
+by compiler?
+
+Even though avoiding assign shaves off 20% of first_stage time in
+simulations, and first_stage is 40-ish percent of total one_pass time, the
+change only shaves off .1 seconds in 1000 reps of one_pass. Perhaps this
+generates additional copies?
+
+
+Even on simple interpreter tests,
+
+	df.assign(blah = ...) is 3x slower than
+	df['blah'] = ...
+
+Changing the final "expensive" assign statement from 
+
+
+    df = df.assign(
+            price_sum = groups.transform(np.sum).values,
+            group_count = groups.transform('count').values,
+            predicted_price = lambda d: numbaratiovec(
+                d.price_sum.to_numpy(),
+                d.price.to_numpy(),
+                d.group_count.to_numpy()
+                    ),
+            resid_price = lambda d: d.predicted_price - d.price
+            )
+
+to 
+	df['price_sum] = 
+	df['group_count'] = 
+
+Shapes off about 20% of the first_stage costs due to copying.
